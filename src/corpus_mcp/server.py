@@ -3,7 +3,7 @@ import sys
 from functools import wraps
 
 from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError
 
 from corpus_mcp.security import SecurityError
 from corpus_mcp.tools import files, search, stats
@@ -16,11 +16,7 @@ mcp = MCPServer("corpus-mcp")
 
 
 def friendly_errors(fn):
-    """Turn expected failures into ToolError so the model sees the message.
-
-    Anything else is still treated as a crash (generic message to the model,
-    full traceback in the server log).
-    """
+    """Turn expected failures into ToolError so the model sees the message."""
 
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -93,6 +89,38 @@ def summarize_folder_stats() -> dict:
     and the most recently modified files."""
     logger.info("summarize_folder_stats")
     return stats.folder_stats()
+
+
+@mcp.resource("docs://{+path}")
+def document_resource(path: str | list[str]) -> str:
+    """The text of one document, addressed by its relative path.
+
+    Example URIs: docs://rag-basics.md, docs://subfolder/nested.md
+    """
+    if isinstance(path, list):
+        path = "/".join(path)
+    logger.info("resource docs://%s", path)
+    try:
+        return files.read_document(path)["content"]
+    except (SecurityError, FileNotFoundError, ValueError) as exc:
+        logger.warning("resource rejected: %s", exc)
+        raise ResourceError(str(exc)) from exc
+
+
+@mcp.prompt()
+def summarize_document(path: str) -> str:
+    """Ask for a structured summary of one document.
+
+    Args:
+        path: Relative path of the document to summarize.
+    """
+    return (
+        f"Use the read_document tool to read '{path}', then summarize it as:\n"
+        "1. One-sentence purpose\n"
+        "2. Key points (3-5 bullets)\n"
+        "3. Any action items or open questions\n"
+        "If the file can't be read, say why and suggest using list_documents."
+    )
 
 
 def main() -> None:
