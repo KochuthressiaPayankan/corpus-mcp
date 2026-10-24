@@ -1,0 +1,1 @@
+Kubernetes basics: pods, deployments, services. kubectl apply -f deploy.yaml creates resources.
