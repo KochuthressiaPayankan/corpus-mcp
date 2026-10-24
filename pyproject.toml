@@ -1,0 +1,26 @@
+[project]
+name = "corpus-mcp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "KochuthressiaPayankan", email = "148636357+KochuthressiaPayankan@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "mcp[cli]>=2.3.0",
+    "python-dotenv>=1.2.4",
+    "rank-bm25>=0.2.2",
+]
+
+[project.scripts]
+corpus-mcp = "corpus_mcp.server:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
