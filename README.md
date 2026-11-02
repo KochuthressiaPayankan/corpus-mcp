@@ -1,66 +1,235 @@
-# corpus-mcp
 
-A local [Model Context Protocol](https://modelcontextprotocol.io) server that lets AI apps like Claude Desktop search and read a folder of documents, with a sandbox that keeps them inside that folder.
+# Corpus MCP
+### A Secure Local Document Retrieval Server for AI Applications
 
-![demo](docs/demo.gif)
+Corpus MCP is a local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that enables AI applications to search, read and retrieve information from a designated folder of documents.
 
-## Tools
+It provides structured document-access tools while enforcing filesystem boundaries to prevent access outside the configured document directory.
 
-| Tool | What it does |
-|------|--------------|
-| `search_documents` | BM25 keyword search, returns ranked `{path, score, snippet}` |
-| `read_document` | Reads one file (truncated at 20,000 characters, flagged if so) |
-| `list_documents` | Lists files with size and modified time, optional extension filter |
-| `summarize_folder_stats` | File counts by type, total size, most recent files |
+**Key focus areas:** Document Retrieval · MCP Integration · Filesystem Security · Python · Automated Testing
 
-It also exposes a `docs://{+path}` resource and a `summarize_document` prompt.
+---
 
-## Setup
+## Overview
+
+AI applications often need access to local documents to provide context-aware responses. However, exposing local files requires careful control over which files can be accessed and how they are retrieved.
+
+Corpus MCP addresses this by providing a controlled interface between AI applications and a user-defined document directory.
+
+The server supports keyword-based document retrieval, file reading, directory listing and document statistics.
+
+## Features
+
+| Feature | Description |
+|---|---|
+| Document Search | BM25 keyword search with ranked results and snippets |
+| Document Reading | Reads document contents with a 20,000-character output limit |
+| File Listing | Lists available documents with size and modification details |
+| Folder Statistics | Provides file counts, total size and recent-file information |
+| MCP Resource | Exposes document access through a `docs://` resource |
+| Summarisation Prompt | Provides a `summarize_document` prompt |
+| Filesystem Security | Restricts file access to the configured document directory |
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["AI Application<br/>MCP Client"] --> B["Corpus MCP Server"]
+    B --> C["MCP Tools"]
+    B --> D["MCP Resources & Prompts"]
+    C --> E["Document Search<br/>BM25"]
+    C --> F["Document Reading"]
+    C --> G["File Listing & Statistics"]
+    F --> H["safe_resolve"]
+    G --> H
+    E --> I["DOCS_ROOT"]
+    H --> I
+    I --> J["Approved Local Documents"]
+```
+
+The server separates tool logic from MCP registration, allowing the underlying functions to be tested independently.
+
+## Available Tools
+
+### 1. `search_documents`
+Searches the document collection using BM25 keyword ranking.
+
+Returns ranked results containing:
+- Document path
+- Relevance score
+- Text snippet
+
+### 2. `read_document`
+Reads the contents of an individual document.
+
+- Maximum output: 20,000 characters
+- Indicates when content has been truncated.
+
+### 3. `list_documents`
+Lists available documents with:
+- File size
+- Modification time
+- Optional extension filtering
+
+### 4. `summarize_folder_stats`
+Provides an overview of the document collection:
+- File counts by extension
+- Total document size
+- Most recently modified files
+
+## Security Architecture
+
+Filesystem access is restricted through a central path-validation function called `safe_resolve`.
+
+Security controls include:
+
+- **Path containment:** Resolves paths and verifies that they remain within `DOCS_ROOT`.
+- **Symlink protection:** Rejects symbolic links that resolve outside the permitted directory.
+- **Extension restrictions:** Supports `.md`, `.txt`, `.py`, `.json`, `.csv` and `.rst`.
+- **File-size restriction:** Rejects files larger than 200 KB.
+- **Output limits:** Truncates large document outputs.
+- **Result limits:** Caps search results at 50.
+
+The test suite includes checks for path traversal, absolute paths and external symbolic links.
+
+## Technology Stack
+
+- **Language:** Python
+- **Protocol:** Model Context Protocol (MCP)
+- **Search:** BM25 keyword retrieval
+- **SDK:** MCP Python SDK v2
+- **Transport:** Standard input/output (stdio)
+- **Testing:** pytest
+- **Package Management:** uv
+
+## Getting Started
+
+### Prerequisites
+
+- Python version compatible with the project configuration
+- [uv](https://docs.astral.sh/uv/)
+- An MCP-compatible client, such as Claude Desktop
+
+### Installation
+
+Clone the repository:
 
 ```bash
-git clone [your repo URL]
+git clone https://github.com/KochuthressiaPayankan/corpus-mcp.git
 cd corpus-mcp
+```
+
+Install dependencies:
+
+```bash
 uv sync
+```
+
+Run the test suite:
+
+```bash
 uv run pytest
 ```
 
-Add this to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`), using absolute paths, then fully quit and reopen the app:
+### Configure Claude Desktop
+
+Add the following configuration to your Claude Desktop configuration file:
+
+`~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "corpus-mcp": {
       "command": "/absolute/path/to/uv",
-      "args": ["--directory", "/absolute/path/to/corpus-mcp", "run", "corpus-mcp"],
-      "env": { "DOCS_ROOT": "/absolute/path/to/your/docs" }
+      "args": [
+        "--directory",
+        "/absolute/path/to/corpus-mcp",
+        "run",
+        "corpus-mcp"
+      ],
+      "env": {
+        "DOCS_ROOT": "/absolute/path/to/your/docs"
+      }
     }
   }
 }
 ```
 
-## Security model
+Replace the example paths with your actual absolute paths.
 
-The server only reads files, and every path goes through one function, `safe_resolve`:
+Restart Claude Desktop after saving the configuration.
 
-- The path is resolved to its real location (collapsing `..` and following symlinks) and must sit inside `DOCS_ROOT`
-- Only allowed extensions: `.md .txt .py .json .csv .rst`
-- Files over 200 KB are refused, and output is truncated
-- Result counts are capped at 50
+## Engineering Decisions
 
-Attempts like `../../etc/passwd`, absolute paths and symlinks pointing outside the folder are rejected, and the tests cover each case.
+**Separation of concerns**
 
-![traversal blocked](docs/traversal-blocked.png)
+Tool logic is implemented as plain functions, while `server.py` handles MCP registration. This keeps the business logic independently testable.
 
-## Design decisions
+**Explicit error handling**
 
-- **Tool logic is plain functions**, and `server.py` only registers them, so everything is testable without a running server.
-- **Expected failures raise `ToolError`.** In the v2 SDK any other exception is reduced to a generic message, so the model couldn't tell why a call failed. Now it sees "File not found... use list_documents" and can recover.
-- **stdio transport only**, since it's local and needs no auth.
-- **BM25 index rebuilds itself** when files change.
-- Built on the `mcp` v2 Python SDK (`MCPServer`).
+Expected failures use `ToolError` messages so that the calling AI application receives useful feedback and can recover from common errors.
+
+**Local-first architecture**
+
+The current implementation uses stdio transport, allowing local integration without introducing a network-facing service.
+
+**Search index maintenance**
+
+The BM25 index rebuilds when documents change, keeping search results aligned with the document collection.
+
+## Testing
+
+The repository includes automated tests covering:
+
+- Tool behaviour
+- Filesystem path validation
+- Path traversal attempts
+- Absolute-path rejection
+- External symbolic-link rejection
+
+Run all tests using:
+
+```bash
+uv run pytest
+```
 
 ## Roadmap
 
-- Swap BM25 for hybrid search backed by Qdrant
-- Streamable HTTP transport with auth, deployed on AWS Lambda
-- Write tools, behind explicit confirmation
+Planned improvements include:
+
+- Hybrid search using Qdrant.
+- Authenticated Streamable HTTP transport.
+- Exploring AWS Lambda deployment.
+- Write operations protected by explicit confirmation.
+
+These are planned enhancements and are not part of the current implementation.
+
+## Repository Structure
+
+```text
+corpus-mcp/
+├── docs/
+├── sample_docs/
+├── src/
+│   └── corpus_mcp/
+├── tests/
+├── .env.example
+├── pyproject.toml
+├── README.md
+└── uv.lock
+```
+
+## Author
+
+**Kochuthressia Payankan**
+
+Computer Science Undergraduate  
+Interested in Cloud Solutions, Technology Consulting and AI.
+
+[GitHub](https://github.com/KochuthressiaPayankan) · [LinkedIn](https://www.linkedin.com/in/kochuthressia-payankan-652844220/)
+
+---
+
+*Exploring secure, practical ways to connect AI applications with local knowledge.*
+
